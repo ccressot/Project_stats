@@ -1,0 +1,121 @@
+#!/bin/env python
+import numpy as np
+import sys,os
+import glob
+import math
+
+def read_monitor(dir):
+    fic=open(dir+'/INV/monitor.txt','r')
+    thefile=fic.readlines()
+
+# filtrage molecule ch4
+    nbl=0
+    lines=[]
+    for i in range(len(thefile)):
+        char=thefile[i].split(' ')
+        molec=str(char[0])
+        if molec.count('ch4'):
+          lines.append(thefile[i])
+          nbl=nbl+1
+# sauvegarde les donnees utiles 
+    obs=np.zeros((nbl),)
+    prior=np.zeros((nbl),)
+    an=np.zeros((nbl),)
+    err=np.zeros((nbl),)
+    for i in range(nbl):
+        if lines[i]!='':
+          char=lines[i].split(' ')
+          obs[i]=float(char[5])
+          prior[i]=float(char[6])
+          an[i]=float(char[7])
+          err[i]=float(char[8])
+    np.savez(dir+"monitor.npz",obs=obs,prior=prior,an=an,err=err)
+
+def read_errors(dir): # lecture des 10 realisations perturbees
+    listfiles=glob.glob(dir+'/MONTECARLO/INV*/monitor.txt')
+    nbl=0
+    lines=[]
+    for thefile in listfiles:
+      fic=open(thefile,'r')
+      thelines=fic.readlines()
+    # filtrage molec ch4 on elimine mcf
+      for i in range(len(thelines)):
+        char=thelines[i].split(' ')
+        molec=str(char[0])
+        if molec.count('ch4'):
+          lines.append(thelines[i])
+          nbl=nbl+1
+# sauvegarde les donnees utiles
+    obs=np.zeros((nbl),)
+    prior=np.zeros((nbl),)
+    an=np.zeros((nbl),)
+    err=np.zeros((nbl),)
+    for i in range(nbl):
+        if lines[i]!='':
+          char=lines[i].split(' ')
+          obs[i]=float(char[5])
+          prior[i]=float(char[6])
+          an[i]=float(char[7])
+          err[i]=float(char[8])
+    np.savez(dir+"mcmonitor.npz",obs=obs,prior=prior,an=an,err=err)
+    
+def calc_stats(data,data2):
+  convert=1000 # conversion ppm to ppb
+  data=np.load(dir+"monitor.npz")
+  data2=np.load(dir+"mcmonitor.npz")
+
+  themes=data['obs']
+  thefg=data['prior']
+  thean=data['an']
+
+  bigmes=data2['obs']
+  bigerr=data2['err']
+  fg=data2['prior']
+  an=data2['an']
+
+  dim=len(bigmes)
+  d=len(themes)
+  nbmembers=dim/d
+
+  mes=np.zeros((dim),)
+  fgref=np.zeros((dim),)
+  anref=np.zeros((dim),)
+  for j in range(nbmembers):
+    mes[j*d:(j+1)*d]=themes[:]
+    fgref[j*d:(j+1)*d]=thefg[:]
+    anref[j*d:(j+1)*d]=thean[:]
+  # diff entre les differentes colonnes
+  diff_pp=fg-fgref
+  diff_po=mes-fgref
+  diff_pa=anref-fgref
+  diff_ao=mes-anref
+ # calcul des ecart-types des erreurs prescrites
+  sigmab=math.sqrt(np.dot(diff_pp,diff_pp)/dim)*convert
+  sigmao=math.sqrt(np.dot(bigerr,bigerr)/dim)*convert
+  sigma=math.sqrt((np.dot(diff_pp,diff_pp)+np.dot(bigerr,bigerr))/dim)*convert
+ # calcul des ecart-types des erreurs diagnostiquees par la methode de Desroziers et al., 2005
+  valb=math.sqrt(np.dot(diff_pa,diff_po)/dim)*convert
+  valo=math.sqrt(np.dot(diff_po,diff_ao)/dim)*convert
+  val=math.sqrt(np.dot(diff_po,diff_po)/dim)*convert
+
+  print 'Ecart type','prescrit','diag','ratio'
+  print 'Obs       ', "%02.2f"%sigmao,"%7.2f"%valo,"%02.2f"%(sigmao/valo)
+  print 'Prior     ',"%02.2f"%sigmab,"%7.2f"%valb,"%02.2f"%(sigmab/valb)
+  print 'Full      ',"%02.2f"%sigma,"%7.2f"%val,"%02.2f"%(sigma/val)
+
+dir=sys.argv[1]
+print dir
+if not os.path.isfile(dir+"monitor.npz"): read_monitor(dir)
+if not os.path.isfile(dir+"mcmonitor.npz"): read_errors(dir)
+
+
+data=np.load(dir+"monitor.npz")
+data2=np.load(dir+"mcmonitor.npz")
+calc_stats(data,data2)
+prior=data['prior']
+an=data['an']
+obs=data['obs']
+biasi=(prior-obs)*1000# calcul du biais initial moyen
+biasf=(an-obs)*1000# clacul du biais final moyen
+print 'Distribution a posteriori'
+print biasf.mean(),biasf.std() # moyenne et ecart-type de la distribution a posteriori
